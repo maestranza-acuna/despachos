@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Despachos Acuña</title>
+<meta name="description" content="Control de despachos de Maestranza Acuña: carga de camiones contra listado, glosa de guía, recepción en obra y avance.">
+<meta name="theme-color" content="#FFCE00">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="192x192" href="iconos/icono-192.png">
+<link rel="apple-touch-icon" href="iconos/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="estilos.css">
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <div class="brand">
+      <small>Maestranza Acuña · Despachos <span id="sync" class="sync"><i class="dot"></i><span>Conectando…</span></span></small>
+      <select id="obraSel" class="obra-sel" aria-label="Obra"></select>
+    </div>
+    <button id="modoBtn" class="modo" type="button" aria-label="Cambiar modo de pantalla">Auto</button>
+    <button id="cuentaBtn" class="modo cuenta" type="button" aria-label="Mi cuenta" hidden></button>
+  </div>
+</header>
+
+<main class="wrap" id="main"><div class="empty">Cargando…</div></main>
+
+<div id="cargo" class="cargo" hidden><div class="wrap"><button id="cargoBtn" class="btn pri" type="button"></button></div></div>
+<div id="toast" class="toast" role="status" hidden></div>
+
+<nav class="nav" aria-label="Secciones" hidden>
+  <div class="wrap">
+    <button type="button" data-tab="despachar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h11v9H3z"/><path d="M14 10h4l3 3v3h-7"/><circle cx="7" cy="17.5" r="1.8"/><circle cx="17" cy="17.5" r="1.8"/></svg>Despachar</button>
+    <button type="button" data-tab="oficina"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5"/><path d="M9 13h7M9 17h7"/></svg>Oficina<span class="badge" id="bOf" hidden></span></button>
+    <button type="button" data-tab="recepcion"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5L20 6"/></svg>Recepción<span class="badge" id="bRc" hidden></span></button>
+    <button type="button" data-tab="avance"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Avance</button>
+  </div>
+</nav>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.3/dist/umd/supabase.js"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
