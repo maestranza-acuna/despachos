@@ -4,5 +4,5 @@
 window.CONFIG = {
   supabaseUrl: "https://diyevlnccglcstyazyrv.supabase.co",
   supabaseKey: "sb_publishable_DajMOd_aVk7fC_dccMIhTA_J1zxLIfq",
-  version: "1.0.0-beta"
+  version: "1.0.0-beta.2"
 };

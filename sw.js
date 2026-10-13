@@ -1,7 +1,7 @@
 /* Service worker: la app abre aunque no haya señal.
    Archivos de la app: primero red (para recibir actualizaciones), si falla, copia guardada.
    Datos de Supabase: nunca se guardan aquí (la app maneja su propia copia). */
-const VERSION = "despachos-1.0.0-beta-1";
+const VERSION = "despachos-1.0.0-beta-2";
 const ARCHIVOS = [
   "./", "index.html", "estilos.css", "app.js", "config.js", "manifest.webmanifest",
   "iconos/icono-192.png", "iconos/icono-512.png",

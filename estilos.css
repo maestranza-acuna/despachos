@@ -231,4 +231,5 @@ td.code{font-family:"Barlow Condensed","Arial Narrow",sans-serif;font-weight:700
 .usr .inp{min-height:44px;font-size:16px}
 body.prueba .top{background:repeating-linear-gradient(-45deg,var(--bg) 0 14px,var(--warn-soft) 14px 28px)}
 body.prueba .brand small::after{content:" · OBRA DE PRUEBA";color:var(--warn);font-weight:700}
-.card[disabled]{opacity:1;cursor:default}
+.card[disabled]{opacity:1;cursor:default}.mk .qtyctl{gap:4px}
+.mk .qtyctl input{width:52px}

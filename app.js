@@ -441,6 +441,7 @@ function filaMarca(x, cons, c) {
       ${enCarga ? `<div class="qtyctl" data-stop>
           <button type="button" data-dec="${esc(x.m)}" aria-label="Quitar uno">−</button>
           <input type="number" inputmode="numeric" min="0" value="${enCarga}" data-set="${esc(x.m)}" id="q-${esc(x.m)}" aria-label="Cantidad ${esc(x.m)}">
+          <button type="button" data-inc="${esc(x.m)}" aria-label="Agregar uno">+</button>
         </div>${aviso ? `<div class="over">${aviso}</div>` : ""}`
       : `<span class="addhint">+ Agregar</span>`}
     </div>
@@ -1010,12 +1011,12 @@ document.addEventListener("click", async ev => {
   if (ds.salir !== undefined) { await sb.auth.signOut(); store.set("copia", null); store.set("yo", null); location.reload(); return; }
   if (t.id === "cuentaBtn") { if (S.yo && S.yo.activo) { S.tab = "cuenta"; S.confirmando = null; render(); window.scrollTo(0, 0); } return; }
   if (ds.tab) { S.tab = ds.tab; S.vista = "elegir"; S.confirmando = null; S.recibiendo = null; history.replaceState(null, "", "#" + ds.tab); render(); window.scrollTo(0, 0); return; }
-  if (ev.target.closest("[data-stop]") && !ds.dec) return;
+  if (ev.target.closest("[data-stop]") && !ds.dec && !ds.inc) return;
   if (ds.add !== undefined && t.classList.contains("mk")) {
     cambiarCant(ds.add, (carga().items[ds.add] || 0) + 1); actualizarFila(ds.add); pedirWakeLock(); return;
   }
   if (ds.dec) { cambiarCant(ds.dec, (carga().items[ds.dec] || 0) - 1); S.vista === "revisar" ? render() : actualizarFila(ds.dec); return; }
-  if (ds.inc) { cambiarCant(ds.inc, (carga().items[ds.inc] || 0) + 1); render(); return; }
+  if (ds.inc) { cambiarCant(ds.inc, (carga().items[ds.inc] || 0) + 1); S.vista === "revisar" ? render() : actualizarFila(ds.inc); return; }
   if (ds.fam !== undefined) { S.fam = ds.fam; S.limite = 80; render(); return; }
   if (ds.clear !== undefined) { S.q = ""; render(); $("#buscar").focus(); return; }
   if (ds.more !== undefined) { S.limite += 80; pintarLista(); return; }
