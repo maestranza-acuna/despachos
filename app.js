@@ -51,7 +51,8 @@ function parseNum(s) {
   if (s.includes(",")) s = s.replace(/\./g, "").replace(",", ".");
   const n = parseFloat(s); return isNaN(n) ? 0 : n;
 }
-function famDe(m) { return m.replace(/-\d+[A-Z]?$/, ""); }
+/* Familia: letras iniciales de la marca. CV-12 → CV (Tekla), V104 → V (M.C.R.) */
+function famDe(m) { return (m.includes("-") ? m.replace(/-\d+[A-Z]?$/, "") : m.replace(/\d+[A-Z]?$/, "")) || m; }
 function uuid() {
   if (crypto.randomUUID) return crypto.randomUUID();
   return "10000000-1000-4000-8000-100000000000".replace(/[018]/g, c => (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
@@ -177,7 +178,7 @@ function leerCopia() {
   return true;
 }
 async function cargarMarcas(obraId) {
-  S.marcas[obraId] = await todas(() => sb.from("marcas").select("marca,perfil,cant,largo,kg_unit,descripcion,familia").eq("obra_id", obraId).order("marca"));
+  S.marcas[obraId] = await todas(() => sb.from("marcas").select("marca,perfil,cant,largo,kg_unit,descripcion,familia,areas").eq("obra_id", obraId).order("marca"));
 }
 async function cargarTodo() {
   const [obras, movs, perfiles] = await Promise.all([
@@ -397,6 +398,7 @@ function renderSinObras(m) {
 /* Cambios de otros usuarios: si alguien está escribiendo, se repinta al salir del campo */
 function renderSeguro() {
   if (!S.yo || !S.yo.activo) return;
+  if (S.previaListado) { S.pendiente = true; setSync(); return; } /* no borrar la revisión de un listado en curso */
   const a = document.activeElement;
   if (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && a.type !== "checkbox") {
     S.pendiente = true;
@@ -709,13 +711,16 @@ function renderOficina(m) {
       ${L.marcas.length
         ? `<p style="margin:0 0 8px"><b>${fmt(L.marcas.length)} marcas · ${fmt(L.marcas.reduce((s, x) => s + x.cant, 0))} piezas · ${peso(L.marcas.reduce((s, x) => s + x.cant * x.kgU, 0))}</b></p><p class="small muted" style="margin:0 0 10px">${esc(o.listadoRev || "")}</p>`
         : `<p style="margin:0 0 10px">Aún no hay listado cargado.</p>`}
-      <details><summary class="btn block">${L.marcas.length ? "Reemplazar por una nueva revisión" : "Cargar listado"}</summary>
+      ${areasDe(o).length ? `<div class="tblwrap" style="margin-bottom:10px"><table><thead><tr><th>Área</th><th>Marcas</th><th>Conjuntos</th><th>Peso</th></tr></thead>
+        <tbody>${areasDe(o).map(([k, v]) => `<tr><td class="code">${esc(k)}</td><td class="num">${fmt(v.marcas)}</td><td class="num">${fmt(v.piezas)}</td><td class="num">${peso(v.kg)}</td></tr>`).join("")}</tbody></table></div>` : ""}
+      <details><summary class="btn block">${L.marcas.length ? (areasDe(o).length ? "Cargar otra área o una revisión" : "Reemplazar por una nueva revisión") : "Cargar listado"}</summary>
         <div style="margin-top:12px">
-          <p class="small">Abre el <b>lista_conjuntos.xls</b> de Tekla, selecciona todo (Ctrl+A), copia y pega aquí. Se leen las filas con marca, perfil, cantidad, largo y peso unitario. Lo ya despachado se conserva.</p>
-          <div class="field"><label for="pegar">Listado pegado</label><textarea id="pegar" class="inp" placeholder="AR-1	LA65X65X5		1	1040	0,3	5,2	5,2	ANGULO REMATE"></textarea></div>
+          <p class="small"><b>Reporte M.C.R.:</b> elige el archivo .csv del área. Se suma a las otras áreas; si esa área ya estaba, solo se actualiza ella. <b>Tekla:</b> abre el lista_conjuntos.xls, selecciona todo (Ctrl+A), copia y pega abajo. Lo ya despachado se conserva. Antes de guardar verás qué va a cambiar.</p>
+          <div class="field"><label for="archivoListado">Archivo del listado</label><input id="archivoListado" class="inp" type="file" accept=".csv,.txt,text/csv,text/plain" style="padding-top:10px"></div>
+          <div class="field"><label for="pegar">O pega el listado</label><textarea id="pegar" class="inp" placeholder="AR-1	LA65X65X5		1	1040	0,3	5,2	5,2	ANGULO REMATE"></textarea></div>
           <div class="field"><label for="rev">Revisión</label><input id="rev" class="inp" placeholder="Rev. B · 15-10-2026"></div>
           <div id="pegarRes" class="small"></div>
-          <button class="btn pri block" type="button" data-cargar-listado>Guardar listado</button>
+          <button class="btn block" type="button" data-cargar-listado style="margin-bottom:10px">Revisar antes de guardar</button>
         </div>
       </details>
     </div>
@@ -737,17 +742,128 @@ function renderOficina(m) {
       <button class="btn block" type="button" data-nueva-obra>Crear obra</button>
     </div>` : ""}`;
 }
+/* Lee un listado de conjuntos. Dos formatos: Tekla (sin áreas) y reporte M.C.R. (un archivo por área).
+   No descarta nada en silencio: lo que no se entiende queda en "errores" y detiene la carga. */
 function leerListado(texto) {
-  const out = [];
-  for (const linea of texto.split(/\r?\n/)) {
-    const cells = linea.split(linea.includes("\t") ? "\t" : ";").map(s => s.trim());
+  const lineas = texto.split(/\r?\n/);
+  const partir = l => l.split(l.includes("\t") ? "\t" : ";").map(s => s.trim());
+  return lineas.some(l => /^\s*ITEM\s*[;\t]\s*Marca/i.test(l)) ? leerMCR(lineas, partir) : leerTekla(lineas, partir);
+}
+function leerTekla(lineas, partir) {
+  const filas = [];
+  for (const linea of lineas) {
+    const cells = partir(linea);
     const mk = (cells[0] || "").toUpperCase();
     if (!/^[A-Z0-9]{1,6}-\d+[A-Z]?$/.test(mk)) continue;
     const cant = parseNum(cells[3]);
     if (!cant) continue;
-    out.push({ marca: mk, perfil: cells[1] || "", cant: Math.round(cant), largo: Math.round(parseNum(cells[4])), kg_unit: parseNum(cells[6]), descripcion: (cells[8] || "").toUpperCase(), familia: famDe(mk) });
+    filas.push({ marca: mk, perfil: cells[1] || "", cant: Math.round(cant), largo: Math.round(parseNum(cells[4])), kg_unit: parseNum(cells[6]), descripcion: (cells[8] || "").toUpperCase(), familia: famDe(mk), areas: {} });
   }
-  return out;
+  const errores = filas.length ? [] : ["No encontré filas de conjuntos en el texto."];
+  return { area: "", filas, errores };
+}
+function leerMCR(lineas, partir) {
+  const filas = [], errores = [], vistas = new Set();
+  let area = "", control = null, sumaKg = 0;
+  lineas.forEach((l, i) => {
+    const c = partir(l), n = i + 1;
+    if (/^AREA\b/i.test(c[0])) { area = (c[1] || "").replace(/-+$/, ""); return; }
+    if (/TOTAL PARA/i.test(l)) {
+      const m = l.match(/TOTAL PARA\s+(\d+)\s+CONJUNTOS/i), nums = c.filter(x => /^\d+([.,]\d+)?$/.test(x));
+      if (m && nums.length) control = { conj: +m[1], kg: parseNum(nums[nums.length - 1]) };
+      else errores.push(`Línea ${n}: no pude leer el total del reporte.`);
+      return;
+    }
+    if (!/^\d+$/.test(c[0] || "")) {
+      if (c.length >= 9 && /^\d+$/.test(c[2] || "")) errores.push(`Línea ${n}: fila sin número de ítem.`);
+      return;
+    }
+    const mk = (c[1] || "").toUpperCase(), cant = parseNum(c[2]), kg = parseNum(c[8]), kgTotal = parseNum(c[9]);
+    if (c.length < 10 || !/^[A-Z0-9][A-Z0-9.-]*$/.test(mk) || !Number.isInteger(cant) || cant <= 0) { errores.push(`Línea ${n}: fila que no entiendo (${l.trim().slice(0, 50)}).`); return; }
+    if (vistas.has(mk)) { errores.push(`Línea ${n}: la marca ${mk} viene repetida.`); return; }
+    if (Math.abs(cant * kg - kgTotal) > 0.05 * cant + 0.051) errores.push(`${mk}: ${cant} × ${kg} kg no da el total del reporte (${kgTotal} kg).`);
+    vistas.add(mk); sumaKg += kgTotal;
+    filas.push({ marca: mk, perfil: c[4] || "", cant, largo: Math.round(parseNum(c[5])), kg_unit: kg, descripcion: (c[3] || "").toUpperCase(), familia: famDe(mk) });
+  });
+  if (!area) errores.push("El reporte no indica el área (línea AREA).");
+  if (!control) errores.push("No encontré la línea TOTAL PARA … CONJUNTOS: el archivo puede estar incompleto.");
+  else {
+    const conj = filas.reduce((s, f) => s + f.cant, 0);
+    if (conj !== control.conj) errores.push(`Leí ${conj} conjuntos y el reporte dice ${control.conj}.`);
+    if (Math.abs(sumaKg - control.kg) > 0.05 * filas.length + 0.1) errores.push(`Leí ${fmt(sumaKg)} kg y el reporte dice ${fmt(control.kg)} kg.`);
+  }
+  return { area, filas, errores };
+}
+/* Calcula qué cambiaría en la base, sin escribir nada */
+function calcularPrevia(o, lect) {
+  const actuales = S.marcas[o.id] || [], porMarca = new Map(actuales.map(r => [r.marca, r]));
+  const hayAreas = actuales.some(r => Object.keys(r.areas || {}).length > 0);
+  const errores = lect.errores.slice();
+  if (lect.area && actuales.length && !hayAreas) errores.push("Esta obra ya tiene un listado sin áreas; un reporte por área lo dejaría inconsistente.");
+  if (!lect.area && hayAreas) errores.push("Esta obra se carga por áreas: usa el reporte M.C.R. de cada área.");
+  if (!lect.filas.length && !errores.length) errores.push("El archivo no trae marcas.");
+  const cons = consumo(o.id), movido = m => (cons.aObra[m] || 0) + (cons.aTrat[m] || 0) + (cons.ret[m] || 0);
+  const upsert = [], borrar = [], avisos = [];
+  let nuevas = 0, cambian = 0;
+  const distinta = (a, b) => a.perfil !== b.perfil || a.largo !== b.largo || Math.abs(+a.kg_unit - +b.kg_unit) > 0.05 || a.descripcion !== b.descripcion;
+  for (const f of lect.filas) {
+    const ex = porMarca.get(f.marca);
+    let fila = f;
+    if (lect.area) {
+      const otras = Object.assign({}, (ex && ex.areas) || {}); delete otras[lect.area];
+      if (ex && Object.keys(otras).length && distinta(ex, f)) errores.push(`${f.marca} ya existe en ${Object.keys(otras).join(", ")} con otra definición (${ex.perfil} · ${ex.largo} mm · ${ex.kg_unit} kg).`);
+      const areas = Object.assign(otras, { [lect.area]: f.cant });
+      fila = Object.assign({}, f, { areas, cant: Object.values(areas).reduce((s, q) => s + q, 0) });
+    }
+    if (!ex) nuevas++; else if (ex.cant !== fila.cant || distinta(ex, fila)) cambian++;
+    if (ex && fila.cant < movido(f.marca)) avisos.push(`${f.marca}: quedarían ${fila.cant} en el listado y ya hay movimientos por ${movido(f.marca)}.`);
+    upsert.push(fila);
+  }
+  const enArchivo = new Set(lect.filas.map(f => f.marca));
+  for (const r of actuales) {
+    if (enArchivo.has(r.marca)) continue;
+    if (lect.area) {
+      if (!r.areas || r.areas[lect.area] === undefined) continue;
+      const otras = Object.assign({}, r.areas); delete otras[lect.area];
+      if (Object.keys(otras).length) {
+        const cant = Object.values(otras).reduce((s, q) => s + q, 0);
+        upsert.push({ marca: r.marca, perfil: r.perfil, cant, largo: r.largo, kg_unit: r.kg_unit, descripcion: r.descripcion, familia: r.familia, areas: otras });
+        cambian++; continue;
+      }
+    }
+    borrar.push(r.marca);
+    if (movido(r.marca)) avisos.push(`${r.marca} sale del listado y ya tiene movimientos registrados.`);
+  }
+  return { area: lect.area, errores, avisos, upsert, borrar, nuevas, cambian, filas: lect.filas.length,
+    piezas: lect.filas.reduce((s, f) => s + f.cant, 0), kg: lect.filas.reduce((s, f) => s + f.cant * f.kg_unit, 0) };
+}
+function mostrarPrevia() {
+  const p = S.previaListado, w = $("#pegarRes"); if (!p || !w) return;
+  const lista = (cl, xs) => `<div class="note ${cl}" style="margin-bottom:8px">${xs.slice(0, 12).map(esc).join("<br>")}${xs.length > 12 ? `<br>… y ${xs.length - 12} más` : ""}</div>`;
+  if (p.errores.length) { w.innerHTML = `<p style="margin:0 0 6px"><b>No se cargó nada.</b> Corrige esto y vuelve a intentar:</p>${lista("warn", p.errores)}`; return; }
+  w.innerHTML = `<p style="margin:0 0 6px"><b>${p.area ? "Área " + esc(p.area) + ": " : ""}${fmt(p.filas)} marcas · ${fmt(p.piezas)} conjuntos · ${peso(p.kg)}</b></p>
+    <p style="margin:0 0 8px">${fmt(p.nuevas)} nuevas · ${fmt(p.cambian)} cambian · ${fmt(p.borrar.length)} salen del listado</p>
+    ${p.avisos.length ? lista("warn", p.avisos) : ""}
+    <p class="row-btns"><button class="btn pri" type="button" data-confirmar-listado>Confirmar carga</button><button class="btn" type="button" data-cancelar-listado>Cancelar</button></p>`;
+}
+function prepararListado() {
+  const t = $("#pegar").value;
+  if (!t.trim()) { $("#pegarRes").textContent = "Elige el archivo o pega el listado primero."; return; }
+  S.previaListado = calcularPrevia(obra(), leerListado(t));
+  mostrarPrevia();
+}
+/* Los .csv de M.C.R. vienen en ANSI: si no es UTF-8 válido se lee como Windows-1252 */
+function decodificar(buf) {
+  try { return new TextDecoder("utf-8", { fatal: true }).decode(buf); }
+  catch (e) { return new TextDecoder("windows-1252").decode(buf); }
+}
+function areasDe(o) {
+  const a = {};
+  for (const r of S.marcas[o.id] || []) for (const [k, q] of Object.entries(r.areas || {})) {
+    const x = a[k] || (a[k] = { marcas: 0, piezas: 0, kg: 0 });
+    x.marcas++; x.piezas += q; x.kg += q * r.kg_unit;
+  }
+  return Object.entries(a).sort(([x], [y]) => x.localeCompare(y, "es", { numeric: true }));
 }
 
 /* --- Recepción --- */
@@ -819,6 +935,7 @@ function renderAvance(m) {
   const barra = (o_, l_, g_, tot) => `<i class="b-obra" style="width:${pct(o_, tot)}%"></i><i class="b-lista" style="width:${pct(l_, tot)}%"></i><i class="b-trat" style="width:${pct(g_, tot)}%"></i>`;
   m.innerHTML = `
     <h2>Avance de despacho</h2>
+    ${areasDe(o).length ? `<p class="small muted" style="margin-top:0">Áreas cargadas: <b>${areasDe(o).map(([k]) => esc(k)).join(", ")}</b>. Los porcentajes son sobre estas áreas.</p>` : ""}
     <div class="kpis">
       <div class="kpi big"><div class="v num">${pct(T.obra[1], T.kg)}%</div><div class="l">del peso total ya despachado a obra · ${peso(T.obra[1])} de ${peso(T.kg)}</div>
         <div class="bar" aria-hidden="true">${barra(T.obra[1], T.lista[1], T.gymsa[1], T.kg)}</div>
@@ -953,10 +1070,8 @@ async function releerMov(id) {
   const { data } = await sb.from("movimientos").select("*").eq("id", id).maybeSingle();
   if (data) { const m = aMov(data), i = S.movs.findIndex(x => x.id === id); if (i >= 0) S.movs[i] = m; else S.movs.unshift(m); recomputar(); guardarCopia(); }
 }
-async function guardarListado(o, filas, rev) {
-  const anteriores = new Set((S.marcas[o.id] || []).map(r => r.marca));
-  const nuevas = new Set(filas.map(f => f.marca));
-  const sacar = [...anteriores].filter(m => !nuevas.has(m));
+async function guardarListado(o, previa, rev) {
+  const filas = previa.upsert, sacar = previa.borrar;
   for (let i = 0; i < filas.length; i += 500) {
     const { error } = await sb.from("marcas").upsert(filas.slice(i, i + 500).map(f => Object.assign({ obra_id: o.id }, f)), { onConflict: "obra_id,marca" });
     if (error) throw error;
@@ -1010,7 +1125,7 @@ document.addEventListener("click", async ev => {
   if (ds.revisar !== undefined) { $("#main").innerHTML = `<div class="empty">Cargando…</div>`; arrancar(); return; }
   if (ds.salir !== undefined) { await sb.auth.signOut(); store.set("copia", null); store.set("yo", null); location.reload(); return; }
   if (t.id === "cuentaBtn") { if (S.yo && S.yo.activo) { S.tab = "cuenta"; S.confirmando = null; render(); window.scrollTo(0, 0); } return; }
-  if (ds.tab) { S.tab = ds.tab; S.vista = "elegir"; S.confirmando = null; S.recibiendo = null; history.replaceState(null, "", "#" + ds.tab); render(); window.scrollTo(0, 0); return; }
+  if (ds.tab) { S.tab = ds.tab; S.vista = "elegir"; S.confirmando = null; S.recibiendo = null; S.previaListado = null; history.replaceState(null, "", "#" + ds.tab); render(); window.scrollTo(0, 0); return; }
   if (ev.target.closest("[data-stop]") && !ds.dec && !ds.inc) return;
   if (ds.add !== undefined && t.classList.contains("mk")) {
     cambiarCant(ds.add, (carga().items[ds.add] || 0) + 1); actualizarFila(ds.add); pedirWakeLock(); return;
@@ -1084,15 +1199,18 @@ document.addEventListener("click", async ev => {
     });
     return;
   }
-  if (ds.cargarListado !== undefined) {
-    const filas = leerListado($("#pegar").value);
-    if (!filas.length) { $("#pegarRes").textContent = "No encontré filas de conjuntos. Copia desde la columna “Conjunto” del Excel de Tekla."; return; }
-    const o = obra(), rev = $("#rev").value.trim() || "Cargado " + new Date().toLocaleDateString("es-CL");
-    $("#pegarRes").textContent = `Guardando ${filas.length} marcas…`;
+  if (ds.cargarListado !== undefined) { prepararListado(); return; }
+  if (ds.cancelarListado !== undefined) { S.previaListado = null; $("#pegarRes").textContent = "Carga cancelada. No se cambió nada."; return; }
+  if (ds.confirmarListado !== undefined) {
+    const o = obra(), p = S.previaListado; if (!p || p.errores.length) return;
+    /* La fecha y hora hacen distinta cada carga, para que los demás teléfonos relean el listado */
+    const base = $("#rev").value.trim() || (p.area ? "Último archivo: área " + p.area : "Listado");
+    const rev = `${base} · cargado ${fechaCorta(new Date().toISOString())}`;
     await conBoton(t, async () => {
-      const sacadas = await guardarListado(o, filas, rev);
-      await refrescar();
-      toast(`Listado guardado: ${filas.length} marcas${sacadas.length ? ` · ${sacadas.length} marcas ya no están en esta revisión` : ""}`);
+      await guardarListado(o, p, rev);
+      S.previaListado = null;
+      await refrescar(); render();
+      toast(`Listado guardado: ${p.filas} marcas${p.area ? " del área " + p.area : ""}`);
     });
     return;
   }
@@ -1181,7 +1299,11 @@ document.addEventListener("input", ev => {
 document.addEventListener("change", ev => {
   const t = ev.target, ds = t.dataset;
   if (t.id === "soloPend") { S.soloPend = t.checked; render(); return; }
-  if (t.id === "obraSel") { S.obraId = t.value; store.set("obraId", t.value); S.fam = ""; S.q = ""; S.vista = "elegir"; S.recibiendo = null;
+  if (t.id === "archivoListado" && t.files[0]) {
+    t.files[0].arrayBuffer().then(b => { $("#pegar").value = decodificar(b); prepararListado(); });
+    return;
+  }
+  if (t.id === "obraSel") { S.obraId = t.value; store.set("obraId", t.value); S.fam = ""; S.q = ""; S.vista = "elegir"; S.recibiendo = null; S.previaListado = null;
     if (!obra().requiereGalv) S.mov = "salida"; if (S.tab === "cuenta") S.tab = INICIO[rol()]; render(); return; }
   if (ds.set !== undefined) { cambiarCant(ds.set, +t.value); S.vista === "revisar" ? render() : actualizarFila(ds.set); return; }
   if (ds.exq !== undefined || ds.rset !== undefined) { render(); return; }
