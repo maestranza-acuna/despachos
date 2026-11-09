@@ -1,0 +1,29 @@
+# Consulta de solo lectura para que Supabase (plan gratis) no pause la base por inactividad.
+# Corre lunes y jueves. Si la base no responde, falla y GitHub avisa por correo.
+name: Mantener activa la base
+
+on:
+  schedule:
+    - cron: "17 12 * * 1,4"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [".github/workflows/mantener_activa.yml"]
+
+permissions: {}
+
+jobs:
+  consulta:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Consultar la base
+        env:
+          URL: https://diyevlnccglcstyazyrv.supabase.co
+          # Clave publica de la app (la misma de config.js). Sin sesion, las reglas por rol no entregan datos.
+          CLAVE: sb_publishable_DajMOd_aVk7fC_dccMIhTA_J1zxLIfq
+        run: |
+          curl --fail --silent --show-error --retry 3 --retry-delay 20 \
+            -H "apikey: $CLAVE" "$URL/rest/v1/obras?select=id&limit=1"
+          echo
+          echo "Base activa: $(date -u +%FT%TZ)"
